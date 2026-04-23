@@ -561,14 +561,7 @@ export default function Page() {
         <h2 style={S.sub}>MATCH</h2>
         <p style={S.tag}>60 seconds. 3 in a row. Pop Ritual community faces.</p>
 
-        <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 36, marginBottom: 8, flexWrap: "wrap", maxWidth: 440 }}>
-          {ALL_PFPS.slice(0, 12).map(p => (
-            <div key={p.id} style={{ width: 32, height: 32, borderRadius: 8, background: p.imageUrl ? `${p.color} url(${p.imageUrl}) center/cover no-repeat` : p.color }} title={`@${p.handle}`} />
-          ))}
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.03)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)" }}>+{ALL_PFPS.length - 12}</div>
-        </div>
-
-        <button onClick={startGame} style={{ ...S.pb, marginTop: 28 }}>START →</button>
+        <button onClick={startGame} style={{ ...S.pb, marginTop: 36 }}>START →</button>
 
         <div style={S.rb}>
           <p style={S.rh}>HOW TO PLAY</p>
@@ -576,6 +569,10 @@ export default function Page() {
             Swap adjacent PFPs to match 3+ in a row. Match 4 for a rocket, 5 for a rainbow. Chain combos for bonus multipliers. At 30s, ice tiles appear — break them by matching around them. Score as much as you can in 60s.
           </p>
         </div>
+
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 28, letterSpacing: 1.5 }}>
+          created by <a href="https://twitter.com/Livinginaprayer" target="_blank" rel="noopener noreferrer" style={{ color: "#5DCAA5", textDecoration: "none", fontWeight: 600 }}>@badang</a>
+        </p>
       </div>
       <style>{animations}</style>
     </div>
@@ -603,7 +600,7 @@ export default function Page() {
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 20, flexDirection: "column" }}>
             <a
-              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`I scored ${score} on Ritual Match 🎨\n\nBest combo: ×${highestCombo || 1}\nGrade: ${grade} — ${label}\n\nCan you beat me?\n\n@ritualfnd @ritualdigest`)}`}
+              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`I scored ${score} on Ritual Match 🎨\n\nBest combo: ×${highestCombo || 1}\nGrade: ${grade} — ${label}\n\nCan you beat me?\n\n@ritualfnd @dunken9718 @joshsimenhoff @0xMadScientist @Jez_Cryptoz`)}`}
               target="_blank"
               rel="noopener noreferrer"
               style={S.shareBtn}
