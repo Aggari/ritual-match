@@ -134,6 +134,7 @@ const TILE_ROCKET_V = "rocket_v";
 const TILE_BOMB = "bomb";
 const TILE_RAINBOW = "rainbow";
 const TILE_ICE = "ice";
+const TILE_MYSTERY = "mystery";
 
 // ─── SOUND ──────────────────────────────────────────────────────
 const useSound = () => {
@@ -231,11 +232,13 @@ const findMatches = (grid) => {
   return matches;
 };
 
-// Apply matches: clear cells, create special tiles, crack ice
+// Apply matches: clear cells, create special tiles, trigger mystery effects
 const applyMatches = (grid, matches) => {
   const newGrid = grid.map(row => row.map(t => t ? { ...t } : null));
   const clearedCells = new Set();
   const specialsToCreate = []; // {r, c, type, pfpId}
+  const mysteryEffects = []; // {r, c, type, label}
+  const iceToAdd = []; // {r, c, pfpId}
 
   matches.forEach(m => {
     m.cells.forEach(([r, c]) => clearedCells.add(`${r},${c}`));
@@ -246,6 +249,35 @@ const applyMatches = (grid, matches) => {
     } else if (m.length >= 5) {
       const [r, c] = m.cells[Math.floor(m.length/2)];
       specialsToCreate.push({ r, c, type: TILE_RAINBOW, pfpId: m.pfpId });
+    }
+  });
+
+  // Check mystery tiles in or adjacent to matches — reveal effect
+  const mysteryToReveal = new Set();
+  clearedCells.forEach(key => {
+    const [r, c] = key.split(",").map(Number);
+    if (newGrid[r][c]?.type === TILE_MYSTERY) mysteryToReveal.add(key);
+    [[r-1,c],[r+1,c],[r,c-1],[r,c+1]].forEach(([nr, nc]) => {
+      if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE && newGrid[nr][nc]?.type === TILE_MYSTERY) {
+        mysteryToReveal.add(`${nr},${nc}`);
+      }
+    });
+  });
+
+  mysteryToReveal.forEach(key => {
+    const [r, c] = key.split(",").map(Number);
+    const result = revealMystery(newGrid, r, c);
+    mysteryEffects.push({ r, c, type: result.type, label: result.label });
+    result.cells.forEach(cell => clearedCells.add(cell));
+    if (result.freezeTarget) {
+      // Pick a random neighbor to freeze
+      const neighbors = [[r-1,c],[r+1,c],[r,c-1],[r,c+1]].filter(([nr,nc]) =>
+        nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE && newGrid[nr][nc] && !clearedCells.has(`${nr},${nc}`)
+      );
+      if (neighbors.length > 0) {
+        const [fr, fc] = neighbors[Math.floor(Math.random() * neighbors.length)];
+        iceToAdd.push({ r: fr, c: fc, pfpId: newGrid[fr][fc].pfpId });
+      }
     }
   });
 
@@ -260,7 +292,7 @@ const applyMatches = (grid, matches) => {
     });
   });
 
-  // Clear matched cells, preserve special creations
+  // Clear matched cells
   clearedCells.forEach(key => {
     const [r, c] = key.split(",").map(Number);
     newGrid[r][c] = null;
@@ -277,7 +309,14 @@ const applyMatches = (grid, matches) => {
     newGrid[r][c] = { id: Math.random().toString(36).slice(2), pfpId, type };
   });
 
-  return { grid: newGrid, clearedCount: clearedCells.size + iceToRemove.size };
+  // Place new ice from freeze effects
+  iceToAdd.forEach(({ r, c, pfpId }) => {
+    if (newGrid[r][c]) {
+      newGrid[r][c] = { ...newGrid[r][c], type: TILE_ICE };
+    }
+  });
+
+  return { grid: newGrid, clearedCount: clearedCells.size + iceToRemove.size, mysteryEffects };
 };
 
 // Activate special tile at (r,c), returns cells to clear
@@ -324,8 +363,8 @@ const applyGravity = (grid) => {
   return newGrid;
 };
 
-// Add random ice tiles
-const addIce = (grid, count = 2) => {
+// Add random mystery tiles — match reveals random effect (bomb/rocket/freeze)
+const addMystery = (grid, count = 2) => {
   const newGrid = grid.map(row => row.map(t => t ? { ...t } : null));
   const candidates = [];
   for (let r = 0; r < GRID_SIZE; r++) for (let c = 0; c < GRID_SIZE; c++) {
@@ -334,14 +373,39 @@ const addIce = (grid, count = 2) => {
   for (let i = 0; i < Math.min(count, candidates.length); i++) {
     const idx = Math.floor(Math.random() * candidates.length);
     const [r, c] = candidates.splice(idx, 1)[0];
-    newGrid[r][c] = { ...newGrid[r][c], type: TILE_ICE };
+    newGrid[r][c] = { ...newGrid[r][c], type: TILE_MYSTERY };
   }
   return newGrid;
+};
+
+// Reveal mystery effect: returns {type, cells}
+// type: "bomb" = adjacent 3x3 blast, "cross" = cross shape, "freeze" = freezes random tile (ice)
+const revealMystery = (grid, r, c) => {
+  const rand = Math.random();
+  if (rand < 0.45) {
+    // Bomb — 3x3 around
+    const cells = new Set();
+    for (let i = r - 1; i <= r + 1; i++) for (let j = c - 1; j <= c + 1; j++) {
+      if (i >= 0 && i < GRID_SIZE && j >= 0 && j < GRID_SIZE) cells.add(`${i},${j}`);
+    }
+    return { type: "bomb", cells, label: "BOOM!" };
+  } else if (rand < 0.8) {
+    // Cross — full row and column
+    const cells = new Set();
+    for (let j = 0; j < GRID_SIZE; j++) cells.add(`${r},${j}`);
+    for (let i = 0; i < GRID_SIZE; i++) cells.add(`${i},${c}`);
+    return { type: "cross", cells, label: "CROSS!" };
+  } else {
+    // Freeze — creates ice on nearby random tile, clears original mystery
+    const cells = new Set([`${r},${c}`]);
+    return { type: "freeze", cells, label: "FROZEN!", freezeTarget: true };
+  }
 };
 
 // ─── MAIN ───────────────────────────────────────────────────────
 export default function Page() {
   const [screen, setScreen] = useState("menu");
+  const [mode, setMode] = useState("timeattack");
   const [grid, setGrid] = useState([]);
   const [selected, setSelected] = useState(null); // [r, c]
   const [score, setScore] = useState(0);
@@ -356,17 +420,18 @@ export default function Page() {
   const processingRef = useRef(false);
 
   // Start game
-  const startGame = () => {
+  const startGame = (gameMode = "timeattack") => {
     PFP_COLORS = pickRandomPFPs();
+    setMode(gameMode);
     setGrid(createGrid()); setScore(0); setCombo(0); setTimer(GAME_TIME);
     setProcessing(false); setFloatingTexts([]); setIceAdded(false);
     setHighestCombo(0); setTotalMatches(0);
     setScreen("game"); sound.start();
   };
 
-  // Timer
+  // Timer (only in time attack mode)
   useEffect(() => {
-    if (screen !== "game" || timer <= 0) return;
+    if (screen !== "game" || mode !== "timeattack" || timer <= 0) return;
     const id = setInterval(() => {
       setTimer(t => {
         if (t <= 6) sound.tick();
@@ -375,22 +440,22 @@ export default function Page() {
       });
     }, 1000);
     return () => clearInterval(id);
-  }, [screen, timer]);
+  }, [screen, mode, timer]);
 
-  // End game when timer hits 0
+  // End game when timer hits 0 (time attack only)
   useEffect(() => {
-    if (screen === "game" && timer === 0) {
+    if (screen === "game" && mode === "timeattack" && timer === 0) {
       setTimeout(() => setScreen("end"), 600);
     }
-  }, [timer, screen]);
+  }, [timer, screen, mode]);
 
-  // Add ice at 30s mark
+  // Add ice at 30s mark (time attack only)
   useEffect(() => {
-    if (screen === "game" && timer === 30 && !iceAdded && !processing) {
-      setGrid(g => addIce(g, 3));
+    if (screen === "game" && mode === "timeattack" && timer === 30 && !iceAdded && !processing) {
+      setGrid(g => addMystery(g, 3));
       setIceAdded(true);
     }
-  }, [timer, screen, iceAdded, processing]);
+  }, [timer, screen, mode, iceAdded, processing]);
 
   // Add floating text
   const addFloat = (r, c, text, color = "#5DCAA5") => {
@@ -439,7 +504,18 @@ export default function Page() {
       setCombo(highestThisChain);
 
       // Apply matches
-      const { grid: afterMatch } = applyMatches(currentGrid, matches);
+      const { grid: afterMatch, mysteryEffects } = applyMatches(currentGrid, matches);
+
+      // Show mystery effect floating texts
+      if (mysteryEffects && mysteryEffects.length > 0) {
+        mysteryEffects.forEach(fx => {
+          const color = fx.type === "bomb" ? "#FFB86B" : fx.type === "cross" ? "#8DB7FF" : "#C8E0FF";
+          addFloat(fx.r, fx.c, fx.label, color);
+        });
+        sound.bomb();
+        totalScore += mysteryEffects.length * 40;
+      }
+
       currentGrid = afterMatch;
       setGrid(currentGrid);
 
@@ -559,14 +635,23 @@ export default function Page() {
         <div style={S.logoDiamond}>◆</div>
         <h1 style={S.title}>RITUAL</h1>
         <h2 style={S.sub}>MATCH</h2>
-        <p style={S.tag}>60 seconds. 3 in a row. Pop Ritual community faces.</p>
+        <p style={S.tag}>3 in a row. Pop Ritual community faces.</p>
 
-        <button onClick={startGame} style={{ ...S.pb, marginTop: 36 }}>START →</button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 36 }}>
+          <button onClick={() => startGame("timeattack")} style={{ ...S.pb, padding: "16px 28px", display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+            <span style={{ fontSize: 14, letterSpacing: 3 }}>TIME ATTACK</span>
+            <span style={{ fontSize: 10, letterSpacing: 1, color: "rgba(94,228,188,0.6)", fontWeight: 400 }}>60s · mystery tiles at 30s</span>
+          </button>
+          <button onClick={() => startGame("chill")} style={{ ...S.pb, padding: "16px 28px", display: "flex", flexDirection: "column", gap: 4, alignItems: "center", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)", boxShadow: "none" }}>
+            <span style={{ fontSize: 14, letterSpacing: 3 }}>CHILL MODE</span>
+            <span style={{ fontSize: 10, letterSpacing: 1, color: "rgba(255,255,255,0.35)", fontWeight: 400 }}>no timer · no mystery</span>
+          </button>
+        </div>
 
         <div style={S.rb}>
           <p style={S.rh}>HOW TO PLAY</p>
           <p style={S.rt}>
-            Swap adjacent PFPs to match 3+ in a row. Match 4 for a rocket, 5 for a rainbow. Chain combos for bonus multipliers. At 30s, ice tiles appear — break them by matching around them. Score as much as you can in 60s.
+            Swap adjacent PFPs to match 3+ in a row. Match 4 for a rocket, 5 for a rainbow. Chain combos for bonus multipliers. In Time Attack, mystery ? tiles appear at 30s — match near them to trigger random effects (bomb, cross-blast, or freeze).
           </p>
         </div>
 
@@ -587,7 +672,7 @@ export default function Page() {
         <div style={S.gridBg} /><div style={S.glowOrb} />
         <div style={{ ...S.mc, maxWidth: 520 }}>
           <div style={{ fontSize: 56, marginBottom: 8 }}>🎉</div>
-          <h1 style={{ ...S.title, fontSize: 36 }}>TIME'S UP</h1>
+          <h1 style={{ ...S.title, fontSize: 36 }}>{mode === "timeattack" ? "TIME'S UP" : "NICE PLAY"}</h1>
           <div style={{ marginTop: 28 }}>
             <div style={{ fontSize: 72, fontWeight: 800, color: "#5ee4bc", fontVariantNumeric: "tabular-nums" }}>{score}</div>
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", letterSpacing: 3, marginTop: 4 }}>TOTAL SCORE</div>
@@ -595,12 +680,21 @@ export default function Page() {
           <div style={S.endGrid}>
             <div style={S.endCell}><span style={S.endLabel}>Best Combo</span><span style={S.endVal}>×{highestCombo || 1}</span></div>
             <div style={S.endCell}><span style={S.endLabel}>Matches</span><span style={S.endVal}>{totalMatches}</span></div>
-            <div style={S.endCell}><span style={S.endLabel}>Grade</span><span style={{ ...S.endVal, color: "#ffd60a" }}>{grade}</span></div>
-            <div style={S.endCell}><span style={S.endLabel}>Rank</span><span style={{ ...S.endVal, fontSize: 16 }}>{label}</span></div>
+            {mode === "timeattack" ? (
+              <>
+                <div style={S.endCell}><span style={S.endLabel}>Grade</span><span style={{ ...S.endVal, color: "#ffd60a" }}>{grade}</span></div>
+                <div style={S.endCell}><span style={S.endLabel}>Rank</span><span style={{ ...S.endVal, fontSize: 16 }}>{label}</span></div>
+              </>
+            ) : (
+              <div style={{ ...S.endCell, gridColumn: "span 2" }}>
+                <span style={S.endLabel}>Mode</span>
+                <span style={{ ...S.endVal, fontSize: 16 }}>Chill · no timer</span>
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 20, flexDirection: "column" }}>
             <a
-              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`I scored ${score} on Ritual Match 🎨\n\nBest combo: ×${highestCombo || 1}\nGrade: ${grade} — ${label}\n\nCan you beat me?\n\n@ritualfnd @dunken9718 @joshsimenhoff @0xMadScientist @Jez_Cryptoz`)}`}
+              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(mode === "timeattack" ? `I scored ${score} on Ritual Match (Time Attack) 🎨\n\nBest combo: ×${highestCombo || 1}\nGrade: ${grade} — ${label}\n\nCan you beat me?\n\n@ritualfnd @dunken9718 @joshsimenhoff @0xMadScientist @Jez_Cryptoz` : `I scored ${score} on Ritual Match 🎨\n\nBest combo: ×${highestCombo || 1}\nMatches: ${totalMatches}\n\n@ritualfnd @dunken9718 @joshsimenhoff @0xMadScientist @Jez_Cryptoz`)}`}
               target="_blank"
               rel="noopener noreferrer"
               style={S.shareBtn}
@@ -608,7 +702,7 @@ export default function Page() {
               Share on X →
             </a>
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={startGame} style={{ ...S.pb, flex: 1 }}>PLAY AGAIN</button>
+              <button onClick={() => startGame(mode)} style={{ ...S.pb, flex: 1 }}>PLAY AGAIN</button>
               <button onClick={() => setScreen("menu")} style={{ ...S.pb, flex: 1, background: "rgba(255,255,255,0.03)", boxShadow: "none", color: "rgba(255,255,255,0.35)" }}>MENU</button>
             </div>
           </div>
@@ -626,9 +720,15 @@ export default function Page() {
       {/* HUD */}
       <div style={S.hud}>
         <div style={S.hl}>
-          <div style={{ ...S.hudTimer, color: timer <= 10 ? "#ff453a" : "#5DCAA5", animation: timer <= 5 ? "pulse 0.5s ease-in-out infinite" : "none" }}>
-            {timer}s
-          </div>
+          {mode === "timeattack" ? (
+            <div style={{ ...S.hudTimer, color: timer <= 10 ? "#ff453a" : "#5DCAA5", animation: timer <= 5 ? "pulse 0.5s ease-in-out infinite" : "none" }}>
+              {timer}s
+            </div>
+          ) : (
+            <button onClick={() => setScreen("end")} style={{ background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 14px", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 1.5 }}>
+              EXIT →
+            </button>
+          )}
         </div>
         <div style={S.hr}>
           {combo >= 2 && <span style={{ ...S.comboBadge, animation: "pop 0.3s ease" }}>×{combo} COMBO</span>}
@@ -655,8 +755,9 @@ export default function Page() {
             if (!tile) return <div key={`${r}-${c}`} style={{ width: cellSize, height: cellSize }} />;
             const pfp = PFP_COLORS[tile.pfpId];
             const isSelected = selected && selected[0] === r && selected[1] === c;
-            const isSpecial = tile.type !== TILE_NORMAL && tile.type !== TILE_ICE;
+            const isMystery = tile.type === TILE_MYSTERY;
             const isIce = tile.type === TILE_ICE;
+            const isSpecial = !isMystery && !isIce && tile.type !== TILE_NORMAL;
 
             return (
               <div
@@ -666,23 +767,30 @@ export default function Page() {
                   width: cellSize,
                   height: cellSize,
                   borderRadius: 10,
-                  background: isIce ? "linear-gradient(135deg, rgba(200,220,240,0.9), rgba(150,180,210,0.7))" : pfp.imageUrl ? `${pfp.color} url(${pfp.imageUrl}) center/cover no-repeat` : pfp.color,
+                  background: isIce
+                    ? "linear-gradient(135deg, rgba(200,220,240,0.9), rgba(150,180,210,0.7))"
+                    : isMystery
+                      ? "linear-gradient(135deg, #9B68FF, #5E3FBF)"
+                      : pfp.imageUrl ? `${pfp.color} url(${pfp.imageUrl}) center/cover no-repeat` : pfp.color,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   cursor: processing ? "default" : "pointer",
                   transform: isSelected ? "scale(1.15)" : "scale(1)",
-                  boxShadow: isSelected ? `0 0 0 3px #fff, 0 0 20px ${pfp.color}80` : isSpecial ? `0 0 12px ${pfp.color}` : "none",
-                  border: isSpecial ? "2px solid #fff" : "none",
+                  boxShadow: isSelected ? `0 0 0 3px #fff, 0 0 20px ${pfp.color}80` : isMystery ? "0 0 14px rgba(155,104,255,0.7)" : isSpecial ? `0 0 12px ${pfp.color}` : "none",
+                  border: isSpecial || isMystery ? "2px solid #fff" : "none",
                   transition: "transform 0.18s, box-shadow 0.18s",
                   position: "relative",
                   fontWeight: 800,
                   fontSize: 10,
                   color: "rgba(0,0,0,0.6)",
+                  animation: isMystery ? "mysteryPulse 1.5s ease-in-out infinite" : "none",
                 }}
               >
                 {isIce ? (
                   <span style={{ fontSize: 20 }}>❄</span>
+                ) : isMystery ? (
+                  <span style={{ fontSize: 22, color: "#fff", fontWeight: 800, textShadow: "0 0 6px rgba(0,0,0,0.6)" }}>?</span>
                 ) : isSpecial ? (
                   <span style={{ fontSize: 18, color: "#fff", textShadow: "0 0 4px rgba(0,0,0,0.8)" }}>
                     {tile.type === TILE_BOMB ? "💣" : tile.type === TILE_RAINBOW ? "✨" : tile.type === TILE_ROCKET_H ? "↔" : "↕"}
@@ -728,6 +836,7 @@ const animations = `
 @keyframes floatUp{0%{transform:translate(-50%,-50%) scale(0.8);opacity:0}20%{transform:translate(-50%,-80%) scale(1.2);opacity:1}100%{transform:translate(-50%,-180%) scale(1);opacity:0}}
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes mysteryPulse{0%,100%{box-shadow:0 0 10px rgba(155,104,255,0.5);transform:scale(1)}50%{box-shadow:0 0 18px rgba(155,104,255,0.9);transform:scale(1.05)}}
 `;
 
 const S = {
