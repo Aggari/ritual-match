@@ -153,111 +153,79 @@ const useSound = () => {
     } catch (e) {}
   };
 
-  // Background music — chiptune-style upbeat melody loop matching the game's bright synth tone
+  // Background music — calm ambient loop with soft pad + gentle arp
   const startMusic = () => {
     try {
       const c = getCtx();
       stopMusic();
 
-      // Bright C major-ish progression with quick arp melody
-      // 16-step pattern (4 bars × 4 beats)
-      const melody = [
-        // Bar 1
-        523, 659, 784, 1047, 784, 659, 523, 659,
-        // Bar 2
-        587, 698, 880, 1175, 880, 698, 587, 698,
-        // Bar 3
-        523, 698, 880, 1047, 880, 698, 523, 440,
-        // Bar 4
-        392, 523, 659, 784, 659, 523, 392, 494,
+      // Slow pad chord progression (Cmaj7 → Em7 → Am7 → Fmaj7)
+      const chords = [
+        [261.63, 329.63, 392.00, 493.88], // Cmaj7
+        [196.00, 246.94, 293.66, 392.00], // Em7
+        [220.00, 261.63, 329.63, 392.00], // Am7
+        [174.61, 261.63, 329.63, 440.00], // Fmaj7
       ];
-      // Bassline — root notes following chord progression
-      const bass = [
-        65.41, 65.41, 65.41, 65.41, 65.41, 65.41, 65.41, 65.41,   // C
-        87.31, 87.31, 87.31, 87.31, 87.31, 87.31, 87.31, 87.31,   // F
-        87.31, 87.31, 87.31, 87.31, 87.31, 87.31, 87.31, 87.31,   // F
-        98.00, 98.00, 98.00, 98.00, 98.00, 98.00, 98.00, 98.00,   // G
+      // Gentle arpeggio notes (C major pentatonic feel)
+      const arpNotes = [
+        523.25, 659.25, 783.99, 1046.50,
+        493.88, 587.33, 783.99, 987.77,
+        523.25, 659.25, 783.99, 1046.50,
+        587.33, 698.46, 880.00, 1046.50,
       ];
+      // Bass — root of each chord
+      const bassNotes = [65.41, 82.41, 55.00, 87.31];
 
       let step = 0;
-      const tickRate = 180; // ms — about 167 BPM, energetic but not frantic
+      const tickRate = 500; // ms — slow, around 60 BPM feel
 
       const loop = () => {
         if (!ctx.current) return;
         const now = ctx.current.currentTime;
-        const i = step % melody.length;
+        const chordIdx = Math.floor(step / 4) % 4;
+        const chord = chords[chordIdx];
 
-        // Lead melody — bright square wave (chiptune lead)
-        const lo = c.createOscillator();
-        const lg = c.createGain();
-        lo.type = "square";
-        lo.frequency.value = melody[i];
-        lg.gain.setValueAtTime(0.025, now);
-        lg.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
-        lo.connect(lg); lg.connect(c.destination);
-        lo.start(now); lo.stop(now + 0.18);
-        musicNodes.current.push(lo, lg);
-
-        // Bass — triangle wave, every step
-        const bo = c.createOscillator();
-        const bg = c.createGain();
-        bo.type = "triangle";
-        bo.frequency.value = bass[i];
-        bg.gain.setValueAtTime(0.05, now);
-        bg.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-        bo.connect(bg); bg.connect(c.destination);
-        bo.start(now); bo.stop(now + 0.2);
-        musicNodes.current.push(bo, bg);
-
-        // Kick on beats 1 and 3 (every 4 steps, on offsets 0 and 2)
-        if (i % 4 === 0) {
-          const ko = c.createOscillator();
-          const kg = c.createGain();
-          ko.type = "sine";
-          ko.frequency.setValueAtTime(140, now);
-          ko.frequency.exponentialRampToValueAtTime(40, now + 0.08);
-          kg.gain.setValueAtTime(0.09, now);
-          kg.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-          ko.connect(kg); kg.connect(c.destination);
-          ko.start(now); ko.stop(now + 0.13);
-          musicNodes.current.push(ko, kg);
+        // Soft pad — sustained chord every 4 steps
+        if (step % 4 === 0) {
+          chord.forEach((freq) => {
+            const o = c.createOscillator();
+            const g = c.createGain();
+            o.type = "sine";
+            o.frequency.value = freq;
+            g.gain.setValueAtTime(0, now);
+            g.gain.linearRampToValueAtTime(0.012, now + 0.6);
+            g.gain.linearRampToValueAtTime(0.008, now + 1.5);
+            g.gain.exponentialRampToValueAtTime(0.001, now + 2.0);
+            o.connect(g); g.connect(c.destination);
+            o.start(now); o.stop(now + 2.05);
+            musicNodes.current.push(o, g);
+          });
         }
 
-        // Snare-ish noise on beat 2 and 4 (offsets 2 and 6 of every 8 steps)
-        if (i % 4 === 2) {
-          const buffer = c.createBuffer(1, c.sampleRate * 0.06, c.sampleRate);
-          const data = buffer.getChannelData(0);
-          for (let j = 0; j < data.length; j++) data[j] = (Math.random() * 2 - 1) * 0.6;
-          const noise = c.createBufferSource();
-          noise.buffer = buffer;
-          const filter = c.createBiquadFilter();
-          filter.type = "bandpass";
-          filter.frequency.value = 2000;
-          filter.Q.value = 1.5;
-          const ng = c.createGain();
-          ng.gain.setValueAtTime(0.04, now);
-          ng.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-          noise.connect(filter); filter.connect(ng); ng.connect(c.destination);
-          noise.start(now); noise.stop(now + 0.08);
-          musicNodes.current.push(noise, ng);
-        }
+        // Soft arp — gentle bell-like tone every step
+        const ao = c.createOscillator();
+        const ag = c.createGain();
+        ao.type = "sine";
+        ao.frequency.value = arpNotes[step % arpNotes.length];
+        ag.gain.setValueAtTime(0, now);
+        ag.gain.linearRampToValueAtTime(0.018, now + 0.04);
+        ag.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+        ao.connect(ag); ag.connect(c.destination);
+        ao.start(now); ao.stop(now + 0.5);
+        musicNodes.current.push(ao, ag);
 
-        // Hi-hat shimmer on every odd step
-        if (i % 2 === 1) {
-          const buffer = c.createBuffer(1, c.sampleRate * 0.03, c.sampleRate);
-          const data = buffer.getChannelData(0);
-          for (let j = 0; j < data.length; j++) data[j] = (Math.random() * 2 - 1) * 0.5;
-          const noise = c.createBufferSource();
-          noise.buffer = buffer;
-          const filter = c.createBiquadFilter();
-          filter.type = "highpass";
-          filter.frequency.value = 8000;
-          const ng = c.createGain();
-          ng.gain.setValueAtTime(0.012, now);
-          ng.gain.exponentialRampToValueAtTime(0.001, now + 0.025);
-          noise.connect(filter); filter.connect(ng); ng.connect(c.destination);
-          noise.start(now); noise.stop(now + 0.03);
-          musicNodes.current.push(noise, ng);
+        // Bass — gentle pulse on beats 1 and 3
+        if (step % 2 === 0) {
+          const bo = c.createOscillator();
+          const bg = c.createGain();
+          bo.type = "sine";
+          bo.frequency.value = bassNotes[chordIdx];
+          bg.gain.setValueAtTime(0, now);
+          bg.gain.linearRampToValueAtTime(0.04, now + 0.05);
+          bg.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+          bo.connect(bg); bg.connect(c.destination);
+          bo.start(now); bo.stop(now + 0.65);
+          musicNodes.current.push(bo, bg);
         }
 
         step++;
@@ -635,17 +603,17 @@ export default function Page() {
     return () => clearInterval(id);
   }, [screen, mode]);
 
-  // Chill mode: difficulty escalation (every 30s)
-  // 0:30 → Stage 1: +1 mystery
-  // 1:00 → Stage 2: +1 mystery, +1 ice
-  // 1:30 → Stage 3: +2 mystery, +1 ice
-  // 2:00 → Stage 4: +2 mystery, +2 ice
-  // 2:30 → Stage 5: +3 mystery, +2 ice
-  // 3:00 → Stage 6: +3 mystery, +3 ice
-  // 3:30+ → keeps adding. Game ends only when no moves left.
+  // Chill mode: difficulty escalation (every 20s)
+  // 0:20 → Stage 1: +1 mystery
+  // 0:40 → Stage 2: +1 mystery, +1 ice
+  // 1:00 → Stage 3: +2 mystery, +1 ice
+  // 1:20 → Stage 4: +2 mystery, +2 ice
+  // 1:40 → Stage 5: +3 mystery, +2 ice
+  // 2:00 → Stage 6: +3 mystery, +3 ice
+  // 2:20+ → keeps adding. Game ends only when no moves left.
   useEffect(() => {
     if (screen !== "game" || mode !== "chill" || processing) return;
-    const targetStage = Math.floor(elapsed / 30);
+    const targetStage = Math.floor(elapsed / 20);
     if (targetStage > chillStage && targetStage > 0) {
       setChillStage(targetStage);
       if (targetStage === 1) {
