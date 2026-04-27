@@ -363,6 +363,30 @@ const applyGravity = (grid) => {
   return newGrid;
 };
 
+// Check if there's any valid swap that creates a match
+const checkPossibleMoves = (grid) => {
+  for (let r = 0; r < GRID_SIZE; r++) {
+    for (let c = 0; c < GRID_SIZE; c++) {
+      const tile = grid[r][c];
+      if (!tile || tile.type === TILE_ICE) continue;
+
+      // Try right swap
+      if (c + 1 < GRID_SIZE && grid[r][c+1] && grid[r][c+1].type !== TILE_ICE) {
+        const test = grid.map(row => row.slice());
+        [test[r][c], test[r][c+1]] = [test[r][c+1], test[r][c]];
+        if (findMatches(test).length > 0) return true;
+      }
+      // Try down swap
+      if (r + 1 < GRID_SIZE && grid[r+1][c] && grid[r+1][c].type !== TILE_ICE) {
+        const test = grid.map(row => row.slice());
+        [test[r][c], test[r+1][c]] = [test[r+1][c], test[r][c]];
+        if (findMatches(test).length > 0) return true;
+      }
+    }
+  }
+  return false;
+};
+
 // Add random mystery tiles — match reveals random effect (bomb/rocket/freeze)
 const addMystery = (grid, count = 2) => {
   const newGrid = grid.map(row => row.map(t => t ? { ...t } : null));
@@ -482,14 +506,18 @@ export default function Page() {
     return () => clearInterval(id);
   }, [screen, mode]);
 
-  // Chill mode: difficulty escalation
-  // Stage 1 at 30s: +1 mystery
-  // Stage 2 at 60s: +1 mystery, +1 ice
-  // Stage 3 at 90s: +1 mystery, +1 ice
-  // Stage 4+ every 30s: +1 mystery, +1 ice
+  // Chill mode: difficulty escalation (designed to end naturally within ~7 minutes)
+  // Stage rises every 60s. Each stage adds more obstacles.
+  // Stage 1 (1m): +1 mystery
+  // Stage 2 (2m): +1 mystery, +1 ice
+  // Stage 3 (3m): +2 mystery, +1 ice
+  // Stage 4 (4m): +2 mystery, +2 ice
+  // Stage 5 (5m): +3 mystery, +2 ice
+  // Stage 6 (6m): +3 mystery, +3 ice
+  // Stage 7 (7m): board floods — game forces end
   useEffect(() => {
     if (screen !== "game" || mode !== "chill" || processing) return;
-    const targetStage = Math.floor(elapsed / 30);
+    const targetStage = Math.floor(elapsed / 60);
     if (targetStage > chillStage && targetStage > 0) {
       setChillStage(targetStage);
       if (targetStage === 1) {
@@ -498,12 +526,41 @@ export default function Page() {
       } else if (targetStage === 2) {
         setGrid(g => addIce(addMystery(g, 1), 1));
         addFloat(0, 4, "ice locked", "#C8E0FF");
-      } else {
-        setGrid(g => addIce(addMystery(g, 1), 1));
-        addFloat(0, 4, `stage ${targetStage}`, "#FF89B5");
+      } else if (targetStage === 3) {
+        setGrid(g => addIce(addMystery(g, 2), 1));
+        addFloat(0, 4, `stage 3`, "#FF89B5");
+      } else if (targetStage === 4) {
+        setGrid(g => addIce(addMystery(g, 2), 2));
+        addFloat(0, 4, `stage 4`, "#FF89B5");
+      } else if (targetStage === 5) {
+        setGrid(g => addIce(addMystery(g, 3), 2));
+        addFloat(0, 4, `stage 5 — heating up`, "#FFB86B");
+      } else if (targetStage === 6) {
+        setGrid(g => addIce(addMystery(g, 3), 3));
+        addFloat(0, 4, `stage 6 — chaos`, "#FFB86B");
+      } else if (targetStage >= 7) {
+        // Final stage: flood the board, force game end
+        addFloat(0, 4, "OVERLOAD", "#ff453a");
+        sound.end();
+        setTimeout(() => setScreen("end"), 1200);
       }
     }
   }, [elapsed, screen, mode, chillStage, processing]);
+
+  // Detect dead board (no possible moves) — auto end
+  useEffect(() => {
+    if (screen !== "game" || processing || grid.length === 0) return;
+    const hasMove = checkPossibleMoves(grid);
+    if (!hasMove) {
+      // Show notice and end
+      const timeoutId = setTimeout(() => {
+        addFloat(0, 4, "no moves left", "#ff453a");
+        sound.end();
+        setTimeout(() => setScreen("end"), 1200);
+      }, 400);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [grid, screen, processing]);
 
   // Add floating text
   const addFloat = (r, c, text, color = "#5DCAA5") => {
