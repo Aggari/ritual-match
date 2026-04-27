@@ -631,7 +631,7 @@ export default function Page() {
   // 2:00 → Stage 2: +2 mystery, +1 ice
   // 3:00 → Stage 3: +2 mystery, +2 ice
   // 4:00 → Stage 4: +3 mystery, +3 ice
-  // 5:00+ → OVERLOAD, force end
+  // 5:00+ → keeps adding obstacles every minute. Game ends only when no moves left.
   useEffect(() => {
     if (screen !== "game" || mode !== "chill" || processing) return;
     const targetStage = Math.floor(elapsed / 60);
@@ -649,10 +649,9 @@ export default function Page() {
       } else if (targetStage === 4) {
         setGrid(g => addIce(addMystery(g, 3), 3));
         addFloat(0, 4, `stage 4 — chaos`, "#FFB86B");
-      } else if (targetStage >= 5) {
-        addFloat(0, 4, "OVERLOAD", "#ff453a");
-        sound.end();
-        setTimeout(() => setScreen("end"), 1200);
+      } else {
+        setGrid(g => addIce(addMystery(g, 3), 3));
+        addFloat(0, 4, `stage ${targetStage}`, "#ff453a");
       }
     }
   }, [elapsed, screen, mode, chillStage, processing]);
