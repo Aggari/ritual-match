@@ -139,6 +139,8 @@ const TILE_MYSTERY = "mystery";
 // ─── SOUND ──────────────────────────────────────────────────────
 const useSound = () => {
   const ctx = useRef(null);
+  const musicNodes = useRef([]);
+  const musicTimers = useRef([]);
   const getCtx = () => { if (!ctx.current) ctx.current = new (window.AudioContext || window.webkitAudioContext)(); return ctx.current; };
   const play = (f, d, t = "sine", v = 0.04) => {
     try {
@@ -150,6 +152,120 @@ const useSound = () => {
       o.start(); o.stop(c.currentTime + d);
     } catch (e) {}
   };
+
+  // Background music — 4-bar lo-fi loop with bass + arp + kick
+  const startMusic = () => {
+    try {
+      const c = getCtx();
+      stopMusic();
+
+      // Lo-fi chord progression in C major (Cmaj7 → Am7 → Fmaj7 → G)
+      const chords = [
+        [261.63, 329.63, 392.00, 493.88], // Cmaj7
+        [220.00, 261.63, 329.63, 392.00], // Am7
+        [174.61, 261.63, 329.63, 440.00], // Fmaj7
+        [196.00, 246.94, 293.66, 392.00], // G
+      ];
+      const bassline = [65.41, 55.00, 43.65, 49.00]; // C2, A1, F1, G1
+      const arp = [523.25, 659.25, 783.99, 659.25]; // C5 E5 G5 E5
+
+      let step = 0;
+      const tickRate = 320; // ms per beat (≈ 187 BPM... we step every 2 beats so ~93 BPM feel)
+
+      const loop = () => {
+        if (!ctx.current) return;
+        const now = ctx.current.currentTime;
+        const chordIdx = Math.floor(step / 4) % 4;
+        const chord = chords[chordIdx];
+
+        // Pad — soft sustained chord (every 4 steps)
+        if (step % 4 === 0) {
+          chord.forEach((freq, i) => {
+            const o = c.createOscillator();
+            const g = c.createGain();
+            o.type = "sine";
+            o.frequency.value = freq;
+            g.gain.setValueAtTime(0, now);
+            g.gain.linearRampToValueAtTime(0.018, now + 0.3);
+            g.gain.linearRampToValueAtTime(0.012, now + 1.0);
+            g.gain.exponentialRampToValueAtTime(0.001, now + 1.28);
+            o.connect(g); g.connect(c.destination);
+            o.start(now); o.stop(now + 1.3);
+            musicNodes.current.push(o, g);
+          });
+        }
+
+        // Bass — every step
+        const bo = c.createOscillator();
+        const bg = c.createGain();
+        bo.type = "triangle";
+        bo.frequency.value = bassline[chordIdx];
+        bg.gain.setValueAtTime(0.05, now);
+        bg.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+        bo.connect(bg); bg.connect(c.destination);
+        bo.start(now); bo.stop(now + 0.32);
+        musicNodes.current.push(bo, bg);
+
+        // Arpeggio — every 2 steps
+        if (step % 2 === 0) {
+          const ao = c.createOscillator();
+          const ag = c.createGain();
+          ao.type = "sine";
+          ao.frequency.value = arp[step % arp.length];
+          ag.gain.setValueAtTime(0.025, now);
+          ag.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+          ao.connect(ag); ag.connect(c.destination);
+          ao.start(now); ao.stop(now + 0.2);
+          musicNodes.current.push(ao, ag);
+        }
+
+        // Soft kick on beats 1 and 3 (step 0 and 2 of each 4-step bar)
+        if (step % 4 === 0 || step % 4 === 2) {
+          const ko = c.createOscillator();
+          const kg = c.createGain();
+          ko.type = "sine";
+          ko.frequency.setValueAtTime(120, now);
+          ko.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+          kg.gain.setValueAtTime(0.08, now);
+          kg.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+          ko.connect(kg); kg.connect(c.destination);
+          ko.start(now); ko.stop(now + 0.16);
+          musicNodes.current.push(ko, kg);
+        }
+
+        // Hi-hat shimmer on offbeats
+        if (step % 2 === 1) {
+          const buffer = c.createBuffer(1, c.sampleRate * 0.05, c.sampleRate);
+          const data = buffer.getChannelData(0);
+          for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+          const noise = c.createBufferSource();
+          noise.buffer = buffer;
+          const filter = c.createBiquadFilter();
+          filter.type = "highpass";
+          filter.frequency.value = 7000;
+          const ng = c.createGain();
+          ng.gain.setValueAtTime(0.015, now);
+          ng.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+          noise.connect(filter); filter.connect(ng); ng.connect(c.destination);
+          noise.start(now); noise.stop(now + 0.05);
+          musicNodes.current.push(noise, ng);
+        }
+
+        step++;
+        const t = setTimeout(loop, tickRate);
+        musicTimers.current.push(t);
+      };
+      loop();
+    } catch (e) {}
+  };
+
+  const stopMusic = () => {
+    musicTimers.current.forEach(t => clearTimeout(t));
+    musicTimers.current = [];
+    musicNodes.current.forEach(n => { try { n.stop && n.stop(); n.disconnect && n.disconnect(); } catch (e) {} });
+    musicNodes.current = [];
+  };
+
   return {
     match: (combo) => {
       const base = 440 + combo * 80;
@@ -167,6 +283,8 @@ const useSound = () => {
     tick: () => play(800, 0.03, "sine", 0.02),
     start: () => { play(440, 0.1); setTimeout(() => play(554, 0.1), 100); setTimeout(() => play(659, 0.15), 200); },
     end: () => { play(600, 0.15); setTimeout(() => play(500, 0.15), 120); setTimeout(() => play(400, 0.25), 240); },
+    startMusic,
+    stopMusic,
   };
 };
 
@@ -457,6 +575,7 @@ export default function Page() {
   const [totalMatches, setTotalMatches] = useState(0);
   const [elapsed, setElapsed] = useState(0); // for chill mode
   const [chillStage, setChillStage] = useState(0); // difficulty stage in chill mode
+  const [musicEnabled, setMusicEnabled] = useState(true);
   const sound = useSound();
   const processingRef = useRef(false);
 
@@ -469,6 +588,7 @@ export default function Page() {
     setHighestCombo(0); setTotalMatches(0);
     setElapsed(0); setChillStage(0);
     setScreen("game"); sound.start();
+    if (musicEnabled) sound.startMusic();
   };
 
   // Timer (only in time attack mode)
@@ -506,41 +626,30 @@ export default function Page() {
     return () => clearInterval(id);
   }, [screen, mode]);
 
-  // Chill mode: difficulty escalation (designed to end naturally within ~7 minutes)
-  // Stage 1 (0:30): +1 mystery
-  // Stage 2 (1:15): +1 mystery, +1 ice
-  // Stage 3 (2:00): +2 mystery, +1 ice
-  // Stage 4 (2:45): +2 mystery, +2 ice
-  // Stage 5 (3:30): +3 mystery, +2 ice
-  // Stage 6 (4:15): +3 mystery, +3 ice
-  // Stage 7+ : keeps adding obstacles, eventually overload
+  // Chill mode: difficulty escalation (every 60s)
+  // 1:00 → Stage 1: +1 mystery
+  // 2:00 → Stage 2: +2 mystery, +1 ice
+  // 3:00 → Stage 3: +2 mystery, +2 ice
+  // 4:00 → Stage 4: +3 mystery, +3 ice
+  // 5:00+ → OVERLOAD, force end
   useEffect(() => {
     if (screen !== "game" || mode !== "chill" || processing) return;
-    // Stage 1 starts at 30s, then every 45s
-    let targetStage = 0;
-    if (elapsed >= 30) targetStage = 1 + Math.floor((elapsed - 30) / 45);
+    const targetStage = Math.floor(elapsed / 60);
     if (targetStage > chillStage && targetStage > 0) {
       setChillStage(targetStage);
       if (targetStage === 1) {
         setGrid(g => addMystery(g, 1));
         addFloat(0, 4, "?? appearing", "#9B68FF");
       } else if (targetStage === 2) {
-        setGrid(g => addIce(addMystery(g, 1), 1));
+        setGrid(g => addIce(addMystery(g, 2), 1));
         addFloat(0, 4, "ice locked", "#C8E0FF");
       } else if (targetStage === 3) {
-        setGrid(g => addIce(addMystery(g, 2), 1));
-        addFloat(0, 4, `stage 3`, "#FF89B5");
-      } else if (targetStage === 4) {
         setGrid(g => addIce(addMystery(g, 2), 2));
-        addFloat(0, 4, `stage 4`, "#FF89B5");
-      } else if (targetStage === 5) {
-        setGrid(g => addIce(addMystery(g, 3), 2));
-        addFloat(0, 4, `stage 5 — heating up`, "#FFB86B");
-      } else if (targetStage === 6) {
+        addFloat(0, 4, `stage 3 — heating up`, "#FFB86B");
+      } else if (targetStage === 4) {
         setGrid(g => addIce(addMystery(g, 3), 3));
-        addFloat(0, 4, `stage 6 — chaos`, "#FFB86B");
-      } else if (targetStage >= 7) {
-        // Final stage: flood the board, force game end
+        addFloat(0, 4, `stage 4 — chaos`, "#FFB86B");
+      } else if (targetStage >= 5) {
         addFloat(0, 4, "OVERLOAD", "#ff453a");
         sound.end();
         setTimeout(() => setScreen("end"), 1200);
@@ -562,6 +671,15 @@ export default function Page() {
       return () => clearTimeout(timeoutId);
     }
   }, [grid, screen, processing]);
+
+  // Stop music when leaving game screen
+  useEffect(() => {
+    if (screen !== "game") {
+      sound.stopMusic();
+    } else if (musicEnabled) {
+      sound.startMusic();
+    }
+  }, [screen, musicEnabled]);
 
   // Add floating text
   const addFloat = (r, c, text, color = "#5DCAA5") => {
@@ -850,6 +968,13 @@ export default function Page() {
           )}
         </div>
         <div style={S.hr}>
+          <button
+            onClick={() => setMusicEnabled(m => !m)}
+            style={{ background: "rgba(255,255,255,0.04)", color: musicEnabled ? "#5DCAA5" : "rgba(255,255,255,0.3)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "6px 10px", fontSize: 14, cursor: "pointer", lineHeight: 1 }}
+            title={musicEnabled ? "Mute music" : "Unmute music"}
+          >
+            {musicEnabled ? "♪" : "♪̸"}
+          </button>
           {combo >= 2 && <span style={{ ...S.comboBadge, animation: "pop 0.3s ease" }}>×{combo} COMBO</span>}
           <div style={S.scoreDisplay}>
             <span style={S.scoreLabel}>SCORE</span>
