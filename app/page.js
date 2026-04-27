@@ -242,11 +242,11 @@ const applyMatches = (grid, matches) => {
 
   matches.forEach(m => {
     m.cells.forEach(([r, c]) => clearedCells.add(`${r},${c}`));
-    // Create special at first cell if length >= 4
-    if (m.length === 4) {
+    // Create special at first cell if length >= 4 (with reduced chance)
+    if (m.length === 4 && Math.random() < 0.5) {
       const [r, c] = m.cells[Math.floor(m.length/2)];
       specialsToCreate.push({ r, c, type: m.dir === "h" ? TILE_ROCKET_V : TILE_ROCKET_H, pfpId: m.pfpId });
-    } else if (m.length >= 5) {
+    } else if (m.length >= 5 && Math.random() < 0.7) {
       const [r, c] = m.cells[Math.floor(m.length/2)];
       specialsToCreate.push({ r, c, type: TILE_RAINBOW, pfpId: m.pfpId });
     }
@@ -507,17 +507,18 @@ export default function Page() {
   }, [screen, mode]);
 
   // Chill mode: difficulty escalation (designed to end naturally within ~7 minutes)
-  // Stage rises every 60s. Each stage adds more obstacles.
-  // Stage 1 (1m): +1 mystery
-  // Stage 2 (2m): +1 mystery, +1 ice
-  // Stage 3 (3m): +2 mystery, +1 ice
-  // Stage 4 (4m): +2 mystery, +2 ice
-  // Stage 5 (5m): +3 mystery, +2 ice
-  // Stage 6 (6m): +3 mystery, +3 ice
-  // Stage 7 (7m): board floods — game forces end
+  // Stage 1 (0:30): +1 mystery
+  // Stage 2 (1:15): +1 mystery, +1 ice
+  // Stage 3 (2:00): +2 mystery, +1 ice
+  // Stage 4 (2:45): +2 mystery, +2 ice
+  // Stage 5 (3:30): +3 mystery, +2 ice
+  // Stage 6 (4:15): +3 mystery, +3 ice
+  // Stage 7+ : keeps adding obstacles, eventually overload
   useEffect(() => {
     if (screen !== "game" || mode !== "chill" || processing) return;
-    const targetStage = Math.floor(elapsed / 60);
+    // Stage 1 starts at 30s, then every 45s
+    let targetStage = 0;
+    if (elapsed >= 30) targetStage = 1 + Math.floor((elapsed - 30) / 45);
     if (targetStage > chillStage && targetStage > 0) {
       setChillStage(targetStage);
       if (targetStage === 1) {
@@ -895,24 +896,37 @@ export default function Page() {
                   justifyContent: "center",
                   cursor: processing ? "default" : "pointer",
                   transform: isSelected ? "scale(1.15)" : "scale(1)",
-                  boxShadow: isSelected ? `0 0 0 3px #fff, 0 0 20px ${pfp.color}80` : isMystery ? "0 0 14px rgba(155,104,255,0.7)" : isSpecial ? `0 0 12px ${pfp.color}` : "none",
-                  border: isSpecial || isMystery ? "2px solid #fff" : "none",
+                  boxShadow: isSelected
+                    ? `0 0 0 3px #fff, 0 0 20px ${pfp.color}80`
+                    : isMystery
+                      ? "0 0 14px rgba(155,104,255,0.7)"
+                      : (tile.type === TILE_ROCKET_H || tile.type === TILE_ROCKET_V)
+                        ? "0 0 0 2px #5DCAA5, 0 0 18px rgba(94,202,165,0.85)"
+                        : tile.type === TILE_RAINBOW
+                          ? "0 0 0 2px #FFD96A, 0 0 18px rgba(255,217,106,0.85)"
+                          : "none",
+                  border: (isSpecial || isMystery) ? "none" : "none",
                   transition: "transform 0.18s, box-shadow 0.18s",
                   position: "relative",
                   fontWeight: 800,
                   fontSize: 10,
                   color: "rgba(0,0,0,0.6)",
-                  animation: isMystery ? "mysteryPulse 1.5s ease-in-out infinite" : "none",
+                  animation: isMystery ? "mysteryPulse 1.5s ease-in-out infinite" : (tile.type === TILE_ROCKET_H || tile.type === TILE_ROCKET_V) ? "rocketPulse 1.4s ease-in-out infinite" : "none",
                 }}
               >
                 {isIce ? (
                   <span style={{ fontSize: 20 }}>❄</span>
                 ) : isMystery ? (
                   <span style={{ fontSize: 22, color: "#fff", fontWeight: 800, textShadow: "0 0 6px rgba(0,0,0,0.6)" }}>?</span>
-                ) : isSpecial ? (
-                  <span style={{ fontSize: 18, color: "#fff", textShadow: "0 0 4px rgba(0,0,0,0.8)" }}>
-                    {tile.type === TILE_BOMB ? "💣" : tile.type === TILE_RAINBOW ? "✨" : tile.type === TILE_ROCKET_H ? "↔" : "↕"}
-                  </span>
+                ) : (tile.type === TILE_ROCKET_H || tile.type === TILE_ROCKET_V) ? (
+                  <>
+                    {/* PFP shows through, with mint overlay icon */}
+                    <span style={{ fontSize: 22, color: "#5DCAA5", fontWeight: 900, textShadow: "0 0 8px rgba(0,0,0,0.9), 0 0 4px rgba(94,202,165,1)", position: "absolute" }}>
+                      {tile.type === TILE_ROCKET_H ? "↔" : "↕"}
+                    </span>
+                  </>
+                ) : tile.type === TILE_RAINBOW ? (
+                  <span style={{ fontSize: 20, color: "#FFD96A", textShadow: "0 0 6px rgba(0,0,0,0.8)", position: "absolute" }}>✨</span>
                 ) : pfp.imageUrl ? null : (
                   pfp.handle.slice(0, 2).toUpperCase()
                 )}
@@ -955,6 +969,7 @@ const animations = `
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes mysteryPulse{0%,100%{box-shadow:0 0 10px rgba(155,104,255,0.5);transform:scale(1)}50%{box-shadow:0 0 18px rgba(155,104,255,0.9);transform:scale(1.05)}}
+@keyframes rocketPulse{0%,100%{box-shadow:0 0 0 2px #5DCAA5, 0 0 14px rgba(94,202,165,0.6)}50%{box-shadow:0 0 0 2px #5DCAA5, 0 0 22px rgba(94,202,165,1)}}
 `;
 
 const S = {
