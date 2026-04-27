@@ -378,6 +378,21 @@ const addMystery = (grid, count = 2) => {
   return newGrid;
 };
 
+// Add random ice tiles
+const addIce = (grid, count = 1) => {
+  const newGrid = grid.map(row => row.map(t => t ? { ...t } : null));
+  const candidates = [];
+  for (let r = 0; r < GRID_SIZE; r++) for (let c = 0; c < GRID_SIZE; c++) {
+    if (newGrid[r][c]?.type === TILE_NORMAL) candidates.push([r, c]);
+  }
+  for (let i = 0; i < Math.min(count, candidates.length); i++) {
+    const idx = Math.floor(Math.random() * candidates.length);
+    const [r, c] = candidates.splice(idx, 1)[0];
+    newGrid[r][c] = { ...newGrid[r][c], type: TILE_ICE };
+  }
+  return newGrid;
+};
+
 // Reveal mystery effect: returns {type, cells}
 // type: "bomb" = adjacent 3x3 blast, "cross" = cross shape, "freeze" = freezes random tile (ice)
 const revealMystery = (grid, r, c) => {
@@ -416,6 +431,8 @@ export default function Page() {
   const [iceAdded, setIceAdded] = useState(false);
   const [highestCombo, setHighestCombo] = useState(0);
   const [totalMatches, setTotalMatches] = useState(0);
+  const [elapsed, setElapsed] = useState(0); // for chill mode
+  const [chillStage, setChillStage] = useState(0); // difficulty stage in chill mode
   const sound = useSound();
   const processingRef = useRef(false);
 
@@ -426,6 +443,7 @@ export default function Page() {
     setGrid(createGrid()); setScore(0); setCombo(0); setTimer(GAME_TIME);
     setProcessing(false); setFloatingTexts([]); setIceAdded(false);
     setHighestCombo(0); setTotalMatches(0);
+    setElapsed(0); setChillStage(0);
     setScreen("game"); sound.start();
   };
 
@@ -456,6 +474,36 @@ export default function Page() {
       setIceAdded(true);
     }
   }, [timer, screen, mode, iceAdded, processing]);
+
+  // Chill mode: elapsed timer (counts up)
+  useEffect(() => {
+    if (screen !== "game" || mode !== "chill") return;
+    const id = setInterval(() => setElapsed(e => e + 1), 1000);
+    return () => clearInterval(id);
+  }, [screen, mode]);
+
+  // Chill mode: difficulty escalation
+  // Stage 1 at 30s: +1 mystery
+  // Stage 2 at 60s: +1 mystery, +1 ice
+  // Stage 3 at 90s: +1 mystery, +1 ice
+  // Stage 4+ every 30s: +1 mystery, +1 ice
+  useEffect(() => {
+    if (screen !== "game" || mode !== "chill" || processing) return;
+    const targetStage = Math.floor(elapsed / 30);
+    if (targetStage > chillStage && targetStage > 0) {
+      setChillStage(targetStage);
+      if (targetStage === 1) {
+        setGrid(g => addMystery(g, 1));
+        addFloat(0, 4, "?? appearing", "#9B68FF");
+      } else if (targetStage === 2) {
+        setGrid(g => addIce(addMystery(g, 1), 1));
+        addFloat(0, 4, "ice locked", "#C8E0FF");
+      } else {
+        setGrid(g => addIce(addMystery(g, 1), 1));
+        addFloat(0, 4, `stage ${targetStage}`, "#FF89B5");
+      }
+    }
+  }, [elapsed, screen, mode, chillStage, processing]);
 
   // Add floating text
   const addFloat = (r, c, text, color = "#5DCAA5") => {
@@ -644,7 +692,7 @@ export default function Page() {
           </button>
           <button onClick={() => startGame("chill")} style={{ ...S.pb, padding: "16px 28px", display: "flex", flexDirection: "column", gap: 4, alignItems: "center", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.7)", boxShadow: "none" }}>
             <span style={{ fontSize: 14, letterSpacing: 3 }}>CHILL MODE</span>
-            <span style={{ fontSize: 10, letterSpacing: 1, color: "rgba(255,255,255,0.35)", fontWeight: 400 }}>no timer · no mystery</span>
+            <span style={{ fontSize: 10, letterSpacing: 1, color: "rgba(255,255,255,0.35)", fontWeight: 400 }}>no timer · gets harder over time</span>
           </button>
         </div>
 
@@ -686,15 +734,15 @@ export default function Page() {
                 <div style={S.endCell}><span style={S.endLabel}>Rank</span><span style={{ ...S.endVal, fontSize: 16 }}>{label}</span></div>
               </>
             ) : (
-              <div style={{ ...S.endCell, gridColumn: "span 2" }}>
-                <span style={S.endLabel}>Mode</span>
-                <span style={{ ...S.endVal, fontSize: 16 }}>Chill · no timer</span>
-              </div>
+              <>
+                <div style={S.endCell}><span style={S.endLabel}>Survived</span><span style={{ ...S.endVal, fontSize: 18 }}>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span></div>
+                <div style={S.endCell}><span style={S.endLabel}>Stage</span><span style={{ ...S.endVal, color: "#FF89B5" }}>{chillStage || 0}</span></div>
+              </>
             )}
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 20, flexDirection: "column" }}>
             <a
-              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(mode === "timeattack" ? `I scored ${score} on Ritual Match (Time Attack) 🎨\n\nBest combo: ×${highestCombo || 1}\nGrade: ${grade} — ${label}\n\nCan you beat me?\n\n@ritualfnd @dunken9718 @joshsimenhoff @0xMadScientist @Jez_Cryptoz` : `I scored ${score} on Ritual Match 🎨\n\nBest combo: ×${highestCombo || 1}\nMatches: ${totalMatches}\n\n@ritualfnd @dunken9718 @joshsimenhoff @0xMadScientist @Jez_Cryptoz`)}`}
+              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(mode === "timeattack" ? `I scored ${score} on Ritual Match (Time Attack) 🎨\n\nBest combo: ×${highestCombo || 1}\nGrade: ${grade} — ${label}\n\nCan you beat me?\n\n@ritualfnd @dunken9718 @joshsimenhoff @0xMadScientist @Jez_Cryptoz` : `I survived ${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")} on Ritual Match (Chill Mode) 🎨\n\nReached stage ${chillStage || 0}\nScore: ${score}\nBest combo: ×${highestCombo || 1}\n\n@ritualfnd @dunken9718 @joshsimenhoff @0xMadScientist @Jez_Cryptoz`)}`}
               target="_blank"
               rel="noopener noreferrer"
               style={S.shareBtn}
@@ -725,9 +773,22 @@ export default function Page() {
               {timer}s
             </div>
           ) : (
-            <button onClick={() => setScreen("end")} style={{ background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 14px", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 1.5 }}>
-              EXIT →
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button onClick={() => setScreen("end")} style={{ background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 14px", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: 1.5 }}>
+                EXIT →
+              </button>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                <span style={{ fontSize: 8, color: "rgba(255,255,255,0.3)", letterSpacing: 2 }}>ELAPSED</span>
+                <span style={{ fontSize: 16, fontWeight: 800, color: "#5DCAA5", fontVariantNumeric: "tabular-nums" }}>
+                  {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}
+                </span>
+              </div>
+              {chillStage > 0 && (
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#FF89B5", background: "rgba(255,137,181,0.08)", border: "1px solid rgba(255,137,181,0.2)", borderRadius: 6, padding: "4px 8px", letterSpacing: 1 }}>
+                  STAGE {chillStage}
+                </div>
+              )}
+            </div>
           )}
         </div>
         <div style={S.hr}>
